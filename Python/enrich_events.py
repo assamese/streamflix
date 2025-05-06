@@ -1,13 +1,15 @@
+"""
+Executes SQL code to create the enriched_table by joining the
+cleaned_events table with the users_dim and the content_dim tables.
+in the PostgreSQL database.
+
+Args:
+    conn: psycopg2 connection object.
+"""
 import psycopg2
 import os
 
 def create_enriched_table(conn):
-    """
-    Executes the SQL code to create the enriched_table in the PostgreSQL database.
-
-    Args:
-        conn: psycopg2 connection object.
-    """
     try:
         cur = conn.cursor()
 

@@ -1,3 +1,24 @@
+"""
+Feature Engineering Script
+
+This script connects to a PostgreSQL database and creates feature tables required for machine learning models. 
+The features are derived from raw event data and include user activity, engagement, content completion rates, 
+and other behavioral metrics. The final feature table is designed to support a "completion prediction" model.
+
+Key Features:
+1. Creates intermediate tables for session identification, user activity, and content engagement.
+2. Aggregates data to compute user and content-level metrics such as completion rates and genre preferences.
+3. Generates a final feature table (`completion_prediction_features`) with all relevant features for modeling.
+
+Dependencies:
+- psycopg2: For connecting to the PostgreSQL database.
+
+Usage:
+1. Ensure the `POSTGRES_PASSWORD` environment variable is set with the database password.
+2. Run the script to create all feature tables in the database.
+
+"""
+
 import psycopg2
 import os
 

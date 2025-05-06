@@ -1,3 +1,27 @@
+"""
+Clean Events Script
+
+This script reads raw event data from a PostgreSQL database, performs data cleaning and validation, 
+and writes the cleaned data to a new table in the database. The cleaning process includes:
+1. Validating data types and presence of required fields.
+2. Filtering out invalid or incomplete events.
+3. Converting timestamps and playback positions to integers.
+4. Ensuring only valid event types are retained.
+
+Key Features:
+- Reads raw events from the `events_table`.
+- Cleans and filters the data based on predefined rules.
+- Writes the cleaned data to the `cleaned_events` table, avoiding duplicates.
+
+Dependencies:
+- psycopg2: For connecting to the PostgreSQL database.
+
+Usage:
+1. Ensure the `POSTGRES_PASSWORD` environment variable is set with the database password.
+2. Run the script to clean and store the events data.
+
+"""
+
 import psycopg2
 import os
 
