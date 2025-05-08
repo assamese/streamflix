@@ -116,7 +116,7 @@ consumer = KafkaConsumer(
 
 while True:
     messages_buffer = []
-    messages_polled = consumer.poll(timeout_ms=5000, max_records=1000)  # Poll for up to 1000 messages or 5 seconds
+    messages_polled = consumer.poll(timeout_ms=1000, max_records=1000)  # Poll for up to 1000 messages or 1 seconds
 
     if not messages_polled:
         print("No messages received in the last 5 seconds. Continuing to poll...")

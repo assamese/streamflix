@@ -37,7 +37,8 @@ def clean_events_data_from_postgres(conn):
         cur = conn.cursor()
 
         # 1. Read raw events data from events_table
-        cur.execute("SELECT event_id, event_ts, user_id, content_id, event_type, playback_position, device FROM events_table")
+        # cur.execute("SELECT event_id, event_ts, user_id, content_id, event_type, playback_position, device FROM events_table")
+        cur.execute("SELECT event_id, event_ts, user_id, content_id, event_type, playback_position, device FROM events_table order by event_ts ASC LIMIT 10000")
         raw_events = cur.fetchall()
         print(f"Read {len(raw_events)} rows from events_table.")
 

@@ -84,10 +84,14 @@ def load_data(conn, query):
 def train_and_evaluate_model(df):
     """
     Trains a Logistic Regression model, evaluates its performance, and prints a report.
+    The data is split into training and testing sets chronologically based on the 'event_ts' field.
 
     Args:
         df: pandas.DataFrame containing the training data.
     """
+    # Sort the DataFrame by 'event_ts' to ensure chronological order
+    df = df.sort_values(by='event_ts')
+
     # Prepare the data
     X = df.drop(['event_id', 'event_ts', 'is_completion', 'user_genre_preference'], axis=1)
     y = df['is_completion']
@@ -99,8 +103,12 @@ def train_and_evaluate_model(df):
     imputer = SimpleImputer(strategy='mean')
     X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns)
 
-    # Split the data into training and testing sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    # Split the data into training and testing sets chronologically
+    test_size = 0.2
+    split_index = int(len(X) * (1 - test_size))  # Index to split the data
+    X_train, X_test = X[:split_index], X[split_index:]
+    y_train, y_test = y[:split_index], y[split_index:]
+
 
     # Train the model
     model = LogisticRegression(random_state=42, solver='liblinear', class_weight='balanced')

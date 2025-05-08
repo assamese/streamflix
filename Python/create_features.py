@@ -1,24 +1,3 @@
-"""
-Feature Engineering Script
-
-This script connects to a PostgreSQL database and creates feature tables required for machine learning models. 
-The features are derived from raw event data and include user activity, engagement, content completion rates, 
-and other behavioral metrics. The final feature table is designed to support a "completion prediction" model.
-
-Key Features:
-1. Creates intermediate tables for session identification, user activity, and content engagement.
-2. Aggregates data to compute user and content-level metrics such as completion rates and genre preferences.
-3. Generates a final feature table (`completion_prediction_features`) with all relevant features for modeling.
-
-Dependencies:
-- psycopg2: For connecting to the PostgreSQL database.
-
-Usage:
-1. Ensure the `POSTGRES_PASSWORD` environment variable is set with the database password.
-2. Run the script to create all feature tables in the database.
-
-"""
-
 import psycopg2
 import os
 
@@ -107,7 +86,7 @@ def create_feature_tables(conn):
         LEFT JOIN
             enriched_table prev_e ON e.user_id = prev_e.user_id
                                 AND prev_e.event_ts < e.event_ts
-                                AND prev_e.event_ts >= (CAST(e.event_ts AS BIGINT) - 2592000000)
+                                AND prev_e.event_ts >= (e.event_ts - 2592000000)
         GROUP BY
             e.event_id, e.user_id, e.event_ts;
         """,
@@ -124,7 +103,7 @@ def create_feature_tables(conn):
         LEFT JOIN
             enriched_table prev_e ON e.user_id = prev_e.user_id
                                 AND prev_e.event_ts < e.event_ts
-                                AND prev_e.event_ts >= (e.event_ts - CAST(30 * 24 * 60 * 60 AS BIGINT) * 1000)
+                                AND prev_e.event_ts >= (e.event_ts - 2592000000)
         JOIN
             content_dim c ON prev_e.content_id = c.content_id
         GROUP BY
@@ -143,7 +122,7 @@ def create_feature_tables(conn):
                 JOIN content_dim cd ON prev_e.content_id = cd.content_id
                 WHERE prev_e.user_id = e.user_id
                 AND prev_e.event_ts < e.event_ts
-                AND prev_e.event_ts >= (CAST(e.event_ts AS BIGINT) - 2592000000)
+                AND prev_e.event_ts >= (e.event_ts - 2592000000)
                 GROUP BY cd.genre
                 ORDER BY COUNT(*) DESC
                 LIMIT 1
@@ -237,10 +216,10 @@ def create_feature_tables(conn):
         -- 12. Create the final feature table
         CREATE TABLE IF NOT EXISTS completion_prediction_features AS
         SELECT
-            e.event_id,
-            e.event_ts,
+            foo.event_id,
+            foo.event_ts,
             u_dim.plan_tier AS user_plan_tier,
-            CAST(FLOOR( (CAST(e.event_ts AS NUMERIC(20,0)) - CAST(EXTRACT(EPOCH FROM u_dim.signup_date) AS NUMERIC(20,0)) * 1000) / (24 * 60 * 60 * 1000)) AS BIGINT) AS days_since_signup,
+            CAST(FLOOR( (foo.event_ts - EXTRACT(EPOCH FROM u_dim.signup_date) * 1000) / (24 * 60 * 60 * 1000)) AS BIGINT) AS days_since_signup,
             ua.user_activity_level,
             ue.user_content_engagement,
             ugp.user_genre_preference,
@@ -252,49 +231,90 @@ def create_feature_tables(conn):
             EXTRACT(YEAR FROM CURRENT_DATE AT TIME ZONE 'UTC') - c_dim.release_year AS content_age,
             ccr.content_completion_rate,
             avdr.average_viewing_duration_ratio,
-            e.event_type,
-            CAST(e.playback_position AS FLOAT) / c_dim.runtime AS playback_position_ratio,
-            e.device,
-            EXTRACT(HOUR FROM TO_TIMESTAMP(e.event_ts / 1000) AT TIME ZONE 'UTC') AS hour_of_day,
-            EXTRACT(DOW FROM TO_TIMESTAMP(e.event_ts / 1000) AT TIME ZONE 'UTC') AS day_of_week,
-            (e.event_ts - LAG(e.event_ts, 1, 0) OVER (PARTITION BY e.user_id, e.content_id ORDER BY e.event_ts)) AS time_since_last_event,
+            foo.event_type,
+            CAST(foo.playback_position AS FLOAT) / c_dim.runtime AS playback_position_ratio,
+            foo.device,
+            EXTRACT(HOUR FROM TO_TIMESTAMP(foo.event_ts / 1000) AT TIME ZONE 'UTC') AS hour_of_day,
+            EXTRACT(DOW FROM TO_TIMESTAMP(foo.event_ts / 1000) AT TIME ZONE 'UTC') AS day_of_week,
+            (foo.event_ts - LAG(foo.event_ts, 1, 0) OVER (PARTITION BY foo.user_id, foo.content_id ORDER BY foo.event_ts)) AS time_since_last_event,
             hpb.has_played_before,
             nop.number_of_pauses,
             CASE
                 WHEN cc_final.is_completed_event = 1 THEN 1
                 WHEN cc_final.stopped_near_end = 1 AND cc_final.num_unique_events > 1 THEN 1
                 ELSE 0
-            END AS is_completion
+            END AS is_completion,
+            -- New Features --
+            (foo.event_ts - LAG(foo.event_ts, 1, 0) OVER (PARTITION BY foo.user_id ORDER BY foo.event_ts)) AS time_since_last_event_user,  
+            (foo.event_ts - LAG(cc_final.session_end_ts, 1, cc_final.session_end_ts) OVER (PARTITION BY foo.user_id ORDER BY foo.event_ts)) AS time_since_last_completion, 
+            AVG(cc_final.session_end_ts - cc_final.session_start_ts) OVER (PARTITION BY foo.user_id) AS user_avg_session_duration, 
+            DENSE_RANK() OVER (PARTITION BY foo.user_id, foo.content_id ORDER BY cc_final.session_start_ts) +
+            DENSE_RANK() OVER (PARTITION BY foo.user_id, foo.content_id ORDER BY cc_final.session_start_ts DESC) - 1 AS user_content_session_count,
+            EXTRACT(HOUR FROM TO_TIMESTAMP(cc_final.session_start_ts / 1000) AT TIME ZONE 'UTC') AS session_start_hour, 
+            EXTRACT(DOW FROM TO_TIMESTAMP(cc_final.session_start_ts / 1000) AT TIME ZONE 'UTC') AS session_start_dow,
+            content_popularity.content_popularity,  
+            content_avg_view_duration_ratio.content_avg_view_duration_ratio, 
+            (EXTRACT(YEAR FROM TO_TIMESTAMP(foo.event_ts / 1000) AT TIME ZONE 'UTC') - c_dim.release_year) AS content_age_at_event,
+            user_genre_recency.genre AS user_genre_recency,  
+            CASE
+                WHEN c_dim.runtime < 1200 THEN 'short'  
+                WHEN c_dim.runtime >= 1200 AND c_dim.runtime <= 3600 THEN 'medium' 
+                ELSE 'long'
+            END AS content_length_category,  
+            ua.user_activity_level * content_popularity.content_popularity AS user_activity_x_content_popularity, 
+            ucr.user_completion_rate * ccr.content_completion_rate AS user_completion_x_content_completion,  
+            EXTRACT(WEEK FROM TO_TIMESTAMP(foo.event_ts / 1000) AT TIME ZONE 'UTC') AS event_week_of_year, 
+            EXTRACT(MONTH FROM TO_TIMESTAMP(foo.event_ts / 1000) AT TIME ZONE 'UTC') AS event_month_of_year,
+            (EXTRACT(YEAR FROM TO_TIMESTAMP(foo.event_ts / 1000) AT TIME ZONE 'UTC') - c_dim.release_year) AS time_since_content_release 
         FROM
-            enriched_table e
+            enriched_table foo
         JOIN
-            users_dim u_dim ON e.user_id = u_dim.user_id
+            users_dim u_dim ON foo.user_id = u_dim.user_id
         JOIN
-            content_dim c_dim ON e.content_id = c_dim.content_id
+            content_dim c_dim ON foo.content_id = c_dim.content_id
         LEFT JOIN
-            user_activity ua ON e.event_id = ua.event_id
+            user_activity ua ON foo.event_id = ua.event_id
         LEFT JOIN
-            user_engagement ue ON e.event_id = ue.event_id
+            user_engagement ue ON foo.event_id = ue.event_id
         LEFT JOIN
-            user_genre_preference ugp ON e.event_id = ugp.event_id
+            user_genre_preference ugp ON foo.event_id = ugp.event_id
         LEFT JOIN
-            user_completion_rate ucr ON e.event_id = ucr.event_id
+            user_completion_rate ucr ON foo.event_id = ucr.event_id
         LEFT JOIN
-            content_completion_rate ccr ON e.event_id = ccr.event_id
+            content_completion_rate ccr ON foo.event_id = ccr.event_id
         LEFT JOIN
-            avg_view_duration_ratio avdr ON e.event_id = avdr.event_id
+            avg_view_duration_ratio avdr ON foo.event_id = avdr.event_id
         LEFT JOIN
-            has_played_before hpb ON e.event_id = hpb.event_id
+            has_played_before hpb ON foo.event_id = hpb.event_id
         LEFT JOIN
-            number_of_pauses nop ON e.event_id = nop.event_id
+            number_of_pauses nop ON foo.event_id = nop.event_id
         LEFT JOIN
-            session_identification si_final ON e.event_id = si_final.event_id
+            session_identification si_final ON foo.event_id = si_final.event_id
         LEFT JOIN
-            content_completion cc_final ON e.user_id = cc_final.user_id
-                                       AND e.content_id = cc_final.content_id
-                                       AND si_final.session_start_ts = cc_final.session_start_ts
+            content_completion cc_final ON foo.user_id = cc_final.user_id
+                                        AND foo.content_id = cc_final.content_id
+                                        AND si_final.session_start_ts = cc_final.session_start_ts
+        LEFT JOIN LATERAL
+            (SELECT COUNT(DISTINCT user_id) as content_popularity
+            FROM enriched_table et
+            WHERE et.event_ts < foo.event_ts AND et.content_id = foo.content_id) AS content_popularity ON TRUE
+        LEFT JOIN LATERAL
+            (SELECT AVG(CASE WHEN et.event_type = 'stop' THEN CAST(et.playback_position AS FLOAT) / cd.runtime ELSE NULL END) AS content_avg_view_duration_ratio
+            FROM enriched_table et
+            JOIN content_dim cd ON et.content_id = cd.content_id
+            WHERE et.event_ts < foo.event_ts AND et.content_id = foo.content_id) AS content_avg_view_duration_ratio ON TRUE
+        LEFT JOIN
+            (SELECT user_id, MAX(session_end_ts) as last_completion_ts
+            FROM content_completion
+            GROUP BY user_id) AS last_completion ON foo.user_id = last_completion.user_id
+        LEFT JOIN
+            (SELECT user_id, cd.genre, MAX(et.event_ts) AS last_genre_event_ts
+            FROM enriched_table et
+            JOIN content_dim cd ON et.content_id = cd.content_id
+            GROUP BY user_id, cd.genre) AS user_genre_recency ON foo.user_id = user_genre_recency.user_id AND c_dim.genre = user_genre_recency.genre
+        WHERE c_dim.release_year IS NOT NULL  
         ORDER BY
-            e.event_ts;
+            foo.event_ts;
         """
     ]
     execute_sql_commands(conn, sql_commands)
