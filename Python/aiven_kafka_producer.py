@@ -1,9 +1,16 @@
 import time
+import sys
 from kafka import KafkaProducer
 
-FILE_TO_READ = "../data_samples/clicks_v1.json"
+file_path = "" # "../data_samples/clicks_v1.json"
 
 TOPIC_NAME = "trumid_streamflix_topic1"
+
+if len(sys.argv) > 1:
+    file_path = sys.argv[1]
+    print(f"Received command-line parameter: {file_path}")
+else:
+    print("Provide command-line parameter (Example: ../data_samples/fresh_clicks_v1.json)")
 
 producer = KafkaProducer(
     bootstrap_servers=f"kafka-223cf11a-llmtravel.b.aivencloud.com:21734",
@@ -14,7 +21,7 @@ producer = KafkaProducer(
 )
 
 try:
-    with open(FILE_TO_READ, 'r') as file:
+    with open(file_path, 'r') as file:
         while True:
             line = file.readline()
             if not line:

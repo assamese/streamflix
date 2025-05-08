@@ -36,6 +36,7 @@ import os
 from io import StringIO
 import subprocess
 from sklearn.impute import SimpleImputer
+import joblib
 import warnings
 
 def install_dependencies():
@@ -154,6 +155,14 @@ def train_and_evaluate_model(df):
     print("\nFeature Importances:")
     for feature, importance in zip(X.columns, model.coef_[0]):
         print(f"{feature:30}: {importance:.3f}")
+
+    # Save the trained model
+    model_filename = 'completion_model.joblib'  # Define the filename
+    joblib.dump(model, model_filename)
+    print(f"Trained model saved to {model_filename}")
+    # Store the feature names in the model object.
+    model.feature_names_ = list(X.columns) # Store the feature names.
+    joblib.dump(model, model_filename) # Save again, with feature names.
 
 def main():
     """
